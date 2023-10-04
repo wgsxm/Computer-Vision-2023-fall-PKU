@@ -30,27 +30,29 @@ def gaussian_blur_kernel_2d(kernel_size=3,sigma=1):
 
 def low_pass(image, kernel_size=3,sigma=1):
     kernel = gaussian_blur_kernel_2d(kernel_size,sigma)
-    return convolve_2d(image,kernel)
+    image_array = np.array(image)
+    shape=image_array.shape[:2]
+    red_channel = image_array[:, :, 0].reshape(shape)
+    green_channel = image_array[:, :, 1].reshape(shape)
+    blue_channel = image_array[:, :, 2].reshape(shape)
+    red_channel_blurred = convolve_2d(red_channel,kernel)
+    green_channel_blurred = convolve_2d(green_channel,kernel)
+    blue_channel_blurred = convolve_2d(blue_channel,kernel)
+    combined_image_array = np.stack((red_channel_blurred, green_channel_blurred, blue_channel_blurred), axis=-1)
+    return combined_image_array
 
 def image_subsampling(image):
-    return image[::2,::2]
+    return image[::2,::2,:]
 
 def gaussian_pyramid(image, kernel_size=3,sigma=1):
     for i in range(1,4):
-        image_array = np.array(image)
-        shape=image_array.shape[:2]
-        red_channel = image_array[:, :, 0].reshape(shape)
-        green_channel = image_array[:, :, 1].reshape(shape)
-        blue_channel = image_array[:, :, 2].reshape(shape)
-        red_channel_blurred = image_subsampling(low_pass(red_channel,kernel_size,sigma))
-        green_channel_blurred = image_subsampling(low_pass(green_channel,kernel_size,sigma))
-        blue_channel_blurred = image_subsampling(low_pass(blue_channel,kernel_size,sigma))
-        combined_image_array = np.stack((red_channel_blurred, green_channel_blurred, blue_channel_blurred), axis=-1)
-        image = Image.fromarray(combined_image_array.astype(np.uint8))
-        image.save("./resolution"+str(i)+".png","PNG")
+        image_array = low_pass(image,kernel_size,sigma)
+        image_array = image_subsampling(image_array)
+        image = Image.fromarray(image_array.astype(np.uint8))
+        image.save("./Lena"+str(i)+".png","PNG")
 
 
-image = Image.open("./Vangogh.png")
+image = Image.open("./Lena.png")
 
 if __name__=="__main__":
-    gaussian_pyramid(image,5,1000)
+    gaussian_pyramid(image,5,10000)
