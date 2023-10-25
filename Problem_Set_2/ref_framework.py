@@ -3,7 +3,7 @@
 import scipy, cv2
 import numpy as np
 import matplotlib.pyplot as plt
-file_path = './Problem_Set_2/Problem2Images/1_2.jpg'
+
 def rgb_to_gray(img):
     if len(img.shape) == 3:
         gray_image = np.mean(img, axis=2).astype(np.float64)
@@ -42,7 +42,7 @@ def gradient_y(img):
     filtered_image = scipy.ndimage.gaussian_filter(gray_image, sigma = 1, mode = 'reflect')
     return scipy.ndimage.sobel(filtered_image, axis = 1, mode = 'reflect')
 
-def harris_response(img, alpha, win_size):
+def harris_response(img, alpha=0.05, win_size=3):
     # In this function you are going to claculate harris response R.
     # Please refer to 04_Feature_Detection.pdf page 29 for details. 
     # You have to discover how to calculate det(M) and trace(M), and
@@ -52,8 +52,7 @@ def harris_response(img, alpha, win_size):
     win_size = win_size // 2
     grad_x = gradient_x(img)
     grad_y = gradient_y(img)
-    sigma = win_size / 5
-    
+    sigma = win_size / 7
     kernel = gaussian_blur_kernel_2d(win_size, sigma)
     A = grad_x * grad_x
     B = grad_x * grad_y
@@ -70,21 +69,22 @@ def harris_response(img, alpha, win_size):
             R[i, j] = windows_R
     return R
 
-def corner_selection(R, th, min_dist):
+def corner_selection(R, th=0.01, min_dist=8):
     # non-maximal suppression for R to get R_selection and transform selected corners to list of tuples
     # hint: 
     #   use ndimage.maximum_filter()  to achieve non-maximum suppression
     #   set those which aren’t **local maximum** to zero.
     # TODO
-    R = scipy.ndimage.maximum_filter(R, size = min_dist)
+    width, height = R.shape
     threshold = th * np.max(R)
     condition_matrix = (R > threshold).astype(np.uint8)
     pix = []
-    for i in range(1, R.shape[0] - 1):
-        for j in range(1, R.shape[1] - 1):
+    for i in range(R.shape[0]):
+        for j in range(R.shape[1]):
             if condition_matrix[i, j]:
-                #pix += [[i, j], [i - 1, j - 1], [i - 1, j], [i - 1, j + 1], [i, j - 1], [i, j + 1], [i + 1, j - 1], [i + 1, j], [i + 1, j + 1]]
-                pix.append([i,j])
+                window = R[np.clip(i-min_dist//2,0,width-1):np.clip(i+min_dist//2,0,width-1), np.clip(j-min_dist//2,0,height-1):np.clip(j+min_dist//2,0,height-1)]
+                if R[i,j]-1e-6<np.max(window) < R[i,j] + 1e-6:
+                    pix.append((i,j))
     return list(pix)
 
 def histogram_of_gradients(img, pix):
@@ -99,13 +99,66 @@ def histogram_of_gradients(img, pix):
     #   6. After that, select the prominent gradient and take it as principle orientation.
     #   7. Then rotate it’s neighbor to fit principle orientation and calculate the histogram again. 
     # TODO
+    WIDTH,HEIGHT = img.shape
+    block_size = 4  # 块大小
+    num_bins = 8  # 方向直方图的箱数
+    grad_x = gradient_x(img)
+    grad_y = gradient_y(img)
+    grad_magnitude = np.sqrt(grad_x**2,grad_y**2)
+    grad_direction = np.arctan2(grad_y,grad_x)*180.0/np.pi + 180.0
+    features = []
+    for cornel in pix:
+        cornel_x, cornel_y = cornel
+        # 选角点周围的区域
+        # 先算出主方向
+        temp_feature = [0 for i in range(num_bins)]
+        for i in range(cornel_x - block_size**2//2 + 1, cornel_x + block_size**2//2 + 1):
+            for j in range(cornel_y - block_size**2//2 + 1, cornel_y + block_size**2//2 + 1):
+                    temp_feature[int(grad_direction[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)]*num_bins/360)]+=grad_magnitude[np.clip(i,0,WIDTH-1),int(np.clip(j,0,HEIGHT-1))]
+        orientation = np.argmax(temp_feature)*np.pi/4
+        change = np.array([[np.cos(orientation),-np.sin(orientation)],[np.sin(orientation),np.cos(orientation)]])
+        feature = []
+        #print(change)
+        # 从右上角往下遍历, 旋转
+        for index_x in range(-block_size//2,block_size//2):
+            for index_y in range(-block_size//2,block_size//2):
+                temp_feature = [0 for i in range(num_bins)]
+                for i in range(cornel_x + index_x * block_size + 1, cornel_x + (index_x + 1) * block_size + 1):
+                    for j in range(cornel_y + index_y * block_size + 1, cornel_y + (index_y + 1) * block_size + 1):
+                        new_point = np.array(change@[i,j],dtype=np.uint8)
+                        x,y=new_point
+                        temp_feature[int(grad_direction[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]*num_bins/360)]+=grad_magnitude[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]
+                feature.append(temp_feature)
+                #print(temp_feature)
+        # 归一化
+        feature = feature / np.sum(feature)
+        features.append(feature)
     return features
+
+
+        
+    
 
 def feature_matching(img_1, img_2):
     # align two images using \verb|harris_response|, \verb|corner_selection|,
     # \verb|histogram_of_gradients|
     # hint: calculate distance by scipy.spacial.distance.cdist (using HoG features, euclidean will work well)
     # TODO
+    THRESHOLD =0.5
+    corners_1 = corner_selection(harris_response(img_1,0.05,3),0.01,3)
+    corners_2 = corner_selection(harris_response(img_2,0.05,3),0.01,3)
+    print("start hog")
+    features_1 = histogram_of_gradients(img_1, corners_1)
+    features_2 = histogram_of_gradients(img_2, corners_2)
+
+    pix_1 = []
+    pix_2 = []
+    for i, feature_1 in enumerate(features_1):
+        for j, feature_2 in enumerate(features_2):
+            bias = np.sqrt(np.sum((feature_1-feature_2)**2))
+            if bias < THRESHOLD:
+                pix_1.append(corners_1[i])
+                pix_2.append(corners_2[j])
     return pix_1, pix_2
 
 def compute_homography(pixels_1, pixels_2):
@@ -143,12 +196,44 @@ if __name__ == '__main__':
     # make image list
     # call generate panorama and it should work well
     # save the generated image following the requirements
+    file_path = './Problem_Set_2/Problem2Images/1_1.jpg'
+    # image = cv2.imread(file_path)
+    # image = rgb_to_gray(image)
+    # R = harris_response(image)
+    # print(histogram_of_gradients(image,corner_selection(harris_response(image))))
+    # exit()
+    # file_path_2 = './Problem_Set_2/Problem2Images/1_2.jpg'
     image = cv2.imread(file_path)
+    # image_2 = cv2.imread(file_path_2)
+    # image = rgb_to_gray(image)
+    # image_2 = rgb_to_gray(image_2)
+    # pix_1,pix_2 = feature_matching(image,image_2)
+    # print(len(pix_1))
+    # for i in pix_1:
+    #     image[i[0],i[1]]=255
+    # for i in pix_2:
+    #     image_2[i[0],i[1]]=255
+    # fig, axes = plt.subplots(1, 2)
+    # axes[0].imshow(image, cmap='gray')
+    # axes[0].set_title('Image 1')
+
+    # # 在第二个子图上显示第二幅图像
+    # axes[1].imshow(image_2, cmap='gray')
+    # axes[1].set_title('Image 2')
+    # for i in range(len(pix_1)):
+    #     plt.plot([pix_1[i],pix_2[i]],'ro-')
+    # plt.show()
+    # grad_x = gradient_x (image)
+    # grad_y = gradient_y (image)
+    # out = np.sqrt(grad_x**2+grad_y**2)
+    # plt.imshow(out,cmap='gray')
+    # plt.show()
     R = harris_response(image,0.05,3)
-    target = corner_selection(R,0.001,3)
+    target = corner_selection(R,0.01,3)
     output = np.zeros_like(R)
     image = rgb_to_gray(image)
     for i in target:
-        image[i[0],i[1]]=255
+        # image[i[0],i[1]]=255
+        plt.plot(i[0],i[1],color='red')
     plt.imshow(image)
     plt.show()
