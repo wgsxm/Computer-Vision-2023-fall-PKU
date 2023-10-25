@@ -3,7 +3,7 @@
 import scipy, cv2
 import numpy as np
 import matplotlib.pyplot as plt
-
+from random import sample
 def rgb_to_gray(img):
     if len(img.shape) == 3:
         gray_image = np.mean(img, axis=2).astype(np.float64)
@@ -65,7 +65,7 @@ def harris_response(img, alpha=0.05, win_size=3):
             windows_C = np.sum(C[i - win_size:i + win_size + 1, j - win_size:j + win_size + 1] * kernel)
             det_R = windows_A * windows_C - windows_B * windows_B
             tr_R = windows_A + windows_C
-            windows_R = det_R - sigma * tr_R**2
+            windows_R = det_R - alpha * tr_R**2
             R[i, j] = windows_R
     return R
 
@@ -128,7 +128,7 @@ def histogram_of_gradients(img, pix):
                         new_point = np.array(change@[i,j],dtype=np.uint8)
                         x,y=new_point
                         temp_feature[int(grad_direction[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]*num_bins/360)]+=grad_magnitude[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]
-                feature.append(temp_feature)
+                feature+=temp_feature
                 #print(temp_feature)
         # 归一化
         feature = feature / np.sum(feature)
@@ -144,7 +144,7 @@ def feature_matching(img_1, img_2):
     # \verb|histogram_of_gradients|
     # hint: calculate distance by scipy.spacial.distance.cdist (using HoG features, euclidean will work well)
     # TODO
-    THRESHOLD =0.5
+    THRESHOLD =0.15
     corners_1 = corner_selection(harris_response(img_1,0.05,3),0.01,3)
     corners_2 = corner_selection(harris_response(img_2,0.05,3),0.01,3)
     print("start hog")
@@ -155,10 +155,16 @@ def feature_matching(img_1, img_2):
     pix_2 = []
     for i, feature_1 in enumerate(features_1):
         for j, feature_2 in enumerate(features_2):
+            temp_point = []
+        temp_bias = []
+        for j, feature_2 in enumerate(features_2):
             bias = np.sqrt(np.sum((feature_1-feature_2)**2))
             if bias < THRESHOLD:
-                pix_1.append(corners_1[i])
-                pix_2.append(corners_2[j])
+                temp_point.append(corners_2[j])
+                temp_bias.append(bias)
+        if len(temp_point):
+            pix_1.append(corners_1[i])
+            pix_2.append(temp_point[np.argmin(temp_bias)])
     return pix_1, pix_2
 
 def compute_homography(pixels_1, pixels_2):
@@ -167,14 +173,56 @@ def compute_homography(pixels_1, pixels_2):
     # consider how to form matrix A for U, S, V = np.linalg.svd((np.transpose(A)).dot(A))
     # homo_matrix = np.reshape(V[np.argmin(S)], (3, 3))
     # TODO
+    A = []
+    for p1, p2 in zip(pixels_1, pixels_2):
+        x1, y1 = p1
+        x2, y2 = p2
+        A.append([x1, y1, 1, 0, 0, 0, -x1 * x2, -y1 * x2, -x2])
+        A.append([0, 0, 0, x1, y1, 1, -x1 * y2, -y1 * y2, -y2])
+    A = np.array(A)
+    # 使用SVD分解
+    U, S, V = np.linalg.svd((np.transpose(A)).dot(A))
+    homo_matrix = np.reshape(V[np.argmin(S)], (3, 3))
     return homo_matrix
 
 def align_pair(pixels_1, pixels_2):
+    
     # utilize \verb|homo_coordinates| for homogeneous pixels
     # and \verb|compute_homography| to calulate homo_matrix
     # implement RANSAC to compute the optimal alignment.
     # you can refer to implementations online.
-    return est_homo
+    num_iterations = 200  # Number of RANSAC iterations
+    inlier_threshold = 5.0  # Threshold for considering a point as an inlier
+    num_picked = 4
+    best_inliers = []  # Best set of inliers
+    best_est_homo = None  # Best estimated homography matrix
+
+    for _ in range(num_iterations):
+        # Randomly sample 4 point correspondences
+        sample_indices = sample(range(len(pixels_1)), num_picked)
+        sampled_pixels_1 = [pixels_1[i] for i in sample_indices]
+        sampled_pixels_2 = [pixels_2[i] for i in sample_indices]
+
+        # Calculate homography matrix using the sampled points
+        est_homo = compute_homography(sampled_pixels_1, sampled_pixels_2)
+
+        # Transform all pixels from image 1 using the estimated homography
+        homo_coordinates_1 = np.array(pixels_1 + [(1,) for _ in range(len(pixels_1))])
+        transformed_pixels = np.dot(est_homo, homo_coordinates_1.T).T
+        transformed_pixels = transformed_pixels[:, :2] / transformed_pixels[:, 2, None]
+
+        # Calculate the Euclidean distance between the transformed pixels and image 2 pixels
+        distances = np.linalg.norm(transformed_pixels - pixels_2, axis=1)
+
+        # Count the number of inliers based on the threshold
+        inliers = np.where(distances < inlier_threshold)[0]
+
+        # Update the best set of inliers and homography matrix if this is the best so far
+        if len(inliers) > len(best_inliers):
+            best_inliers = inliers
+            best_est_homo = est_homo
+
+    return best_est_homo
 
 def stitch_blend(img_1, img_2, est_homo):
     # hint: 
@@ -183,6 +231,31 @@ def stitch_blend(img_1, img_2, est_homo):
     # Together with four corner pixels of the other image, we can get the size of new image plane.
     # Then, remap both image to new image plane and blend two images using Alpha Blending.
     # TODO
+    H, W = img_1.shape[:2]
+    corners = np.array([[0, 0, 1], [W, 0, 1], [W, H, 1], [0, H, 1]])
+    projected_corners = np.dot(est_homo, corners.T).T
+    projected_corners /= projected_corners[:, 2, np.newaxis]
+    min_x, min_y = np.min(projected_corners[:, :2], axis=0)
+    max_x, max_y = np.max(projected_corners[:, :2], axis=0)
+    width,height = img_2.shape
+    if min_x < 0:
+        width -= min_x
+    if min_y < 0:
+        height +=min_x
+    width = max(width,max_x)
+    height = max(height,max_y)
+    est_img = np.zeros((width,height))
+    for i in range(W):
+        for j in range(H):
+            est_img[i,j]=img_1[i,j]
+    for i in range(img_2.shape[0]):
+        for j in range(img_2.shape[1]):
+            x,y=i,j
+            if min_x<0:
+                x-=min_x
+            if min_y<0:
+                y-=min_y
+            est_img[x,y]=img_2[i,j]
     return est_img
 
 
