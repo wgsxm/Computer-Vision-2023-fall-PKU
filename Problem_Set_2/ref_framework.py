@@ -112,8 +112,7 @@ def histogram_of_gradients(img, pix):
         for i in range(cornel_x - block_size**2//2 + 1, cornel_x + block_size**2//2 + 1):
             for j in range(cornel_y - block_size**2//2 + 1, cornel_y + block_size**2//2 + 1):
                     temp_feature[int(grad_direction[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)]*num_bins/360)]+=grad_magnitude[np.clip(i,0,WIDTH-1),int(np.clip(j,0,HEIGHT-1))]
-        orientation = np.argmax(temp_feature)*np.pi/4
-        change = np.array([[np.cos(orientation),-np.sin(orientation)],[np.sin(orientation),np.cos(orientation)]])
+        orientation = np.argmax(temp_feature)*360/num_bins
         feature = []
         #print(change)
         # 从右上角往下遍历, 旋转
@@ -122,9 +121,10 @@ def histogram_of_gradients(img, pix):
                 temp_feature = [0 for i in range(num_bins)]
                 for i in range(cornel_x + index_x * block_size + 1, cornel_x + (index_x + 1) * block_size + 1):
                     for j in range(cornel_y + index_y * block_size + 1, cornel_y + (index_y + 1) * block_size + 1):
-                        new_point = np.array(change@[i,j],dtype=np.uint8)
-                        x,y=new_point
-                        temp_feature[int(grad_direction[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]*num_bins/360)]+=grad_magnitude[np.clip(x,0,WIDTH-1),np.clip(y,0,HEIGHT-1)]
+                        temp_angle = grad_direction[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)] - orientation
+                        if temp_angle<0:
+                             temp_angle+=360
+                        temp_feature[int(temp_angle*num_bins/360)]+=grad_magnitude[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)]
                 feature+=temp_feature
                 #print(temp_feature)
         # 归一化
@@ -144,15 +144,13 @@ def feature_matching(img_1, img_2):
     THRESHOLD =0.15
     corners_1 = corner_selection(harris_response(img_1,0.05,3),0.01,3)
     corners_2 = corner_selection(harris_response(img_2,0.05,3),0.01,3)
-    print("start hog")
     features_1 = histogram_of_gradients(img_1, corners_1)
     features_2 = histogram_of_gradients(img_2, corners_2)
 
     pix_1 = []
     pix_2 = []
     for i, feature_1 in enumerate(features_1):
-        for j, feature_2 in enumerate(features_2):
-            temp_point = []
+        temp_point = []
         temp_bias = []
         for j, feature_2 in enumerate(features_2):
             bias = np.sqrt(np.sum((feature_1-feature_2)**2))
@@ -242,13 +240,16 @@ def stitch_blend(img_1, img_2, est_homo):
         height -= min_x
     if min_y < 0:
         width +=min_y   
+    print(img_1.shape)
+    print(img_2.shape)
     print(min_x,min_y)
     width = max(width,max_y)
     height = max(height,max_x)
-    est_img = np.zeros((int(width),int(height)))
+    print(width,height)
+    est_img = np.zeros((int(width)+1,int(height)+1))
     for i in range(W):
         for j in range(H):
-            x,y=i,j
+            x,y = i,j
             py,px=0,0
             if min_x>0:
                 y = int(y+min_x)
@@ -261,7 +262,8 @@ def stitch_blend(img_1, img_2, est_homo):
             if y>px and py <= x <= img_2.shape[0]+py:
                  est_img[x,y]=img_1[i,j]*alpha
             else:
-                est_img[x,y]=img_1[i,j]
+                est_img[x,y]=\
+                img_1[i,j]
     for i in range(img_2.shape[0]-1):
         for j in range(img_2.shape[1]-1):
             x,y=i,j
