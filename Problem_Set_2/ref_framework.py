@@ -32,14 +32,12 @@ def gradient_x(img):
     # should we conduct some pre-processing to remove noise? which kernel should we pply?
     # which kernel should we choose to calculate gradient_x?
     # TODO
-    gray_image = rgb_to_gray(img)
-    filtered_image = scipy.ndimage.gaussian_filter(gray_image, sigma = 1, mode = 'reflect')
+    filtered_image = scipy.ndimage.gaussian_filter(img, sigma = 1, mode = 'reflect')
     return scipy.ndimage.sobel(filtered_image, axis = 0, mode = 'reflect')
 
 def gradient_y(img):
     # TODO
-    gray_image = rgb_to_gray(img)
-    filtered_image = scipy.ndimage.gaussian_filter(gray_image, sigma = 1, mode = 'reflect')
+    filtered_image = scipy.ndimage.gaussian_filter(img, sigma = 1, mode = 'reflect')
     return scipy.ndimage.sobel(filtered_image, axis = 1, mode = 'reflect')
 
 def harris_response(img, alpha=0.05, win_size=3):
@@ -49,12 +47,11 @@ def harris_response(img, alpha=0.05, win_size=3):
     # remember to smooth the gradients. 
     # Avoid using too much "for" loops to speed up.
     # TODO
+    kernel = gaussian_blur_kernel_2d(win_size, win_size/7)
+    A = grad_x * grad_x
     win_size = win_size // 2
     grad_x = gradient_x(img)
     grad_y = gradient_y(img)
-    sigma = win_size / 7
-    kernel = gaussian_blur_kernel_2d(win_size, sigma)
-    A = grad_x * grad_x
     B = grad_x * grad_y
     C = grad_y * grad_y
     R = np.zeros_like(A)
@@ -231,31 +228,58 @@ def stitch_blend(img_1, img_2, est_homo):
     # Together with four corner pixels of the other image, we can get the size of new image plane.
     # Then, remap both image to new image plane and blend two images using Alpha Blending.
     # TODO
-    H, W = img_1.shape[:2]
+    W, H= img_1.shape[:2]
     corners = np.array([[0, 0, 1], [W, 0, 1], [W, H, 1], [0, H, 1]])
     projected_corners = np.dot(est_homo, corners.T).T
     projected_corners /= projected_corners[:, 2, np.newaxis]
-    min_x, min_y = np.min(projected_corners[:, :2], axis=0)
-    max_x, max_y = np.max(projected_corners[:, :2], axis=0)
+    min_x = np.min(projected_corners[:,1])
+    max_x = np.max(projected_corners[:,1])
+    min_y = np.min(projected_corners[:,0])
+    max_y = np.max(projected_corners[:,0])
     width,height = img_2.shape
+    alpha = 0.45
     if min_x < 0:
-        width -= min_x
+        height -= min_x
     if min_y < 0:
-        height +=min_x
-    width = max(width,max_x)
-    height = max(height,max_y)
-    est_img = np.zeros((width,height))
+        width +=min_y   
+    print(min_x,min_y)
+    width = max(width,max_y)
+    height = max(height,max_x)
+    est_img = np.zeros((int(width),int(height)))
     for i in range(W):
         for j in range(H):
-            est_img[i,j]=img_1[i,j]
-    for i in range(img_2.shape[0]):
-        for j in range(img_2.shape[1]):
             x,y=i,j
+            py,px=0,0
+            if min_x>0:
+                y = int(y+min_x)
+            else:
+                px = -min_x
+            if min_y>0:
+                x = int(x+min_y)
+            else:
+                py = -min_y
+            if y>px and py <= x <= img_2.shape[0]+py:
+                 est_img[x,y]=img_1[i,j]*alpha
+            else:
+                est_img[x,y]=img_1[i,j]
+    for i in range(img_2.shape[0]-1):
+        for j in range(img_2.shape[1]-1):
+            x,y=i,j
+            px,py=0,0
             if min_x<0:
-                x-=min_x
+                y-=min_x
+            else:
+                px =min_x
             if min_y<0:
-                y-=min_y
-            est_img[x,y]=img_2[i,j]
+                x-=min_y
+            else:
+                py =min_y
+            x = int(x)
+            y = int(y)
+            if y<px+img_1.shape[1] and py <= x <= img_2.shape[0]+py:
+                 est_img[x,y]+=img_2[i,j]*(1-alpha)
+            else:
+                est_img[x,y]+=img_2[i,j]
     return est_img
 
 
@@ -269,44 +293,4 @@ if __name__ == '__main__':
     # make image list
     # call generate panorama and it should work well
     # save the generated image following the requirements
-    file_path = './Problem_Set_2/Problem2Images/1_1.jpg'
-    # image = cv2.imread(file_path)
-    # image = rgb_to_gray(image)
-    # R = harris_response(image)
-    # print(histogram_of_gradients(image,corner_selection(harris_response(image))))
-    # exit()
-    # file_path_2 = './Problem_Set_2/Problem2Images/1_2.jpg'
-    image = cv2.imread(file_path)
-    # image_2 = cv2.imread(file_path_2)
-    # image = rgb_to_gray(image)
-    # image_2 = rgb_to_gray(image_2)
-    # pix_1,pix_2 = feature_matching(image,image_2)
-    # print(len(pix_1))
-    # for i in pix_1:
-    #     image[i[0],i[1]]=255
-    # for i in pix_2:
-    #     image_2[i[0],i[1]]=255
-    # fig, axes = plt.subplots(1, 2)
-    # axes[0].imshow(image, cmap='gray')
-    # axes[0].set_title('Image 1')
-
-    # # 在第二个子图上显示第二幅图像
-    # axes[1].imshow(image_2, cmap='gray')
-    # axes[1].set_title('Image 2')
-    # for i in range(len(pix_1)):
-    #     plt.plot([pix_1[i],pix_2[i]],'ro-')
-    # plt.show()
-    # grad_x = gradient_x (image)
-    # grad_y = gradient_y (image)
-    # out = np.sqrt(grad_x**2+grad_y**2)
-    # plt.imshow(out,cmap='gray')
-    # plt.show()
-    R = harris_response(image,0.05,3)
-    target = corner_selection(R,0.01,3)
-    output = np.zeros_like(R)
-    image = rgb_to_gray(image)
-    for i in target:
-        # image[i[0],i[1]]=255
-        plt.plot(i[0],i[1],color='red')
-    plt.imshow(image)
-    plt.show()
+    pass
