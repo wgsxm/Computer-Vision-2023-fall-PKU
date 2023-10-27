@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import sample
 from matplotlib.patches import ConnectionPatch
+import time
+FEATURE_MATCHING_THRESHOLD =0.12
 def rgb_to_gray(img):
     if len(img.shape) == 3:
         gray_image = np.mean(img, axis=2).astype(np.float64)
@@ -19,14 +21,6 @@ def gaussian_blur_kernel_2d(kernel_size=3,sigma=1):
             kernel[x+r,y+r] = 1/(2*np.pi*sigma**2)*np.exp(-1/(2*sigma**2)*(x**2+y**2))
     kernel = kernel / np.sum(kernel)
     return kernel
-def convolve_2d(X,K):
-    height,width = K.shape
-    X = np.flip(np.flip(X, axis=0), axis=1)
-    Y = np.zeros((X.shape[0]-height+1,X.shape[1]-width+1))
-    for i in range(Y.shape[0]):
-        for j in range(Y.shape[1]):
-            Y[i][j]=(X[i:i+height, j:j+height]*K).sum()
-    return np.flip(np.flip(Y, axis=0), axis=1)
 def gradient_x(img):
     # convert img to grayscale
     # should we use int type to calclate gradient?
@@ -107,28 +101,28 @@ def histogram_of_gradients(img, pix):
     features = []
     for cornel in pix:
         cornel_x, cornel_y = cornel
-        temp_feature = [0 for i in range(num_bins)]
-        for i in range(cornel_x - block_size**2//2 + 1, cornel_x + block_size**2//2 + 1):
-            for j in range(cornel_y - block_size**2//2 + 1, cornel_y + block_size**2//2 + 1):
-                    temp_angle = int(grad_direction[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)]*num_bins/360)
-                    if temp_angle == num_bins:
-                        temp_angle = num_bins - 1
-                    temp_feature[temp_angle]+=grad_magnitude[np.clip(i,0,WIDTH-1),int(np.clip(j,0,HEIGHT-1))]
+        temp_feature = np.zeros(num_bins)
+        i_range = np.arange(cornel_x - block_size**2 // 2 + 1, cornel_x + block_size**2 // 2 + 1)
+        j_range = np.arange(cornel_y - block_size**2 // 2 + 1, cornel_y + block_size**2 // 2 + 1)
+        i_range = np.clip(i_range, 0, WIDTH - 1)
+        j_range = np.clip(j_range, 0, HEIGHT - 1)
+        temp_angle = (np.clip(grad_direction[i_range, j_range] * num_bins // 360, 0, num_bins - 1)).astype(int)
+        temp_feature += np.bincount(temp_angle, grad_magnitude[i_range, j_range], minlength=num_bins)
         orientation = np.argmax(temp_feature)*360/num_bins
         feature = []
         for index_x in range(-block_size//2,block_size//2):
             for index_y in range(-block_size//2,block_size//2):
-                temp_feature = [0 for i in range(num_bins)]
-                for i in range(cornel_x + index_x * block_size + 1, cornel_x + (index_x + 1) * block_size + 1):
-                    for j in range(cornel_y + index_y * block_size + 1, cornel_y + (index_y + 1) * block_size + 1):
-                        temp_angle = grad_direction[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)] - orientation
-                        if temp_angle<0:
-                             temp_angle+=360
-                        temp_angle = int(temp_angle*num_bins/360)
-                        if temp_angle == num_bins:
-                            temp_angle = num_bins - 1
-                        temp_feature[temp_angle]+=grad_magnitude[np.clip(i,0,WIDTH-1),np.clip(j,0,HEIGHT-1)]
-                feature+=temp_feature
+                i_range = np.arange(cornel_x + index_x * block_size + 1, cornel_x + (index_x + 1) * block_size + 1)
+                j_range = np.arange(cornel_y + index_y * block_size + 1, cornel_y + (index_y + 1) * block_size + 1)
+                i_range = np.clip(i_range, 0, WIDTH - 1)
+                j_range = np.clip(j_range, 0, HEIGHT - 1)
+                temp_angle = grad_direction[i_range, j_range] - orientation
+                temp_angle = (temp_angle + 360) % 360
+                temp_angle = (temp_angle * num_bins / 360).astype(int)
+                temp_angle = np.clip(temp_angle, 0, num_bins - 1)
+                temp_feature = np.zeros(num_bins,dtype=np.float64)
+                temp_feature += np.bincount(temp_angle, grad_magnitude[i_range, j_range], minlength=num_bins).astype(float)
+                feature+=temp_feature.tolist()
         # 归一化
         feature = feature / np.sum(feature)
         features.append(feature)
@@ -139,12 +133,10 @@ def feature_matching(img_1, img_2):
     # \verb|histogram_of_gradients|
     # hint: calculate distance by scipy.spacial.distance.cdist (using HoG features, euclidean will work well)
     # TODO
-    THRESHOLD =0.14
     corners_1 = corner_selection(harris_response(img_1,0.05,3),0.01,3)
     corners_2 = corner_selection(harris_response(img_2,0.05,3),0.01,3)
     features_1 = histogram_of_gradients(img_1, corners_1)
     features_2 = histogram_of_gradients(img_2, corners_2)
-
     pix_1 = []
     pix_2 = []
     for i, feature_1 in enumerate(features_1):
@@ -152,7 +144,7 @@ def feature_matching(img_1, img_2):
         temp_bias = []
         for j, feature_2 in enumerate(features_2):
             bias = np.sqrt(np.sum((feature_1-feature_2)**2))
-            if bias < THRESHOLD:
+            if bias < FEATURE_MATCHING_THRESHOLD:
                 temp_point.append(corners_2[j])
                 temp_bias.append(bias)
         if len(temp_point):
@@ -183,7 +175,7 @@ def align_pair(pixels_1, pixels_2):
     # and \verb|compute_homography| to calulate homo_matrix
     # implement RANSAC to compute the optimal alignment.
     # you can refer to implementations online.
-    num_iterations = 200 # Number of RANSAC iterations
+    num_iterations = 2000 # Number of RANSAC iterations
     inlier_threshold = 5.0  # Threshold for considering a point as an inlier
     num_picked = 4
     best_inliers = []  # Best set of inliers
@@ -259,7 +251,11 @@ def stitch_blend(img_1, img_2, est_homo):
                 x,y=int(target[0]),int(target[1])
                 # 如果在img2中
                 if startx_2<i<endx_2 and starty_2<j<endy_2:
-                    est_img[i,j]+=img_1[x,y]*(1-ALPHA)
+                    u,v,w = est_img[i,j]
+                    if -1e-6<u<1e-6 and -1e-6<v<1e-6 and -1e-6<w<1e-6:
+                        est_img[i,j]=img_1[x,y]
+                    else:
+                        est_img[i,j]+=img_1[x,y]*(1-ALPHA)
                 else:
                     est_img[i,j] = img_1[x,y]
     return np.array(est_img,dtype=np.uint8)
@@ -268,7 +264,65 @@ def generate_panorama(ordered_img_seq):
     # finally we can use \verb|feature_matching| \verb|align_pair| and \verb|stitch_blend| to generate 
     # panorama with multiple images
     # TODO
-    return est_panorama
+    global FEATURE_MATCHING_THRESHOLD
+
+    def local_match(corners_1,corners_2,features_1,features_2):
+        pix_1 = []
+        pix_2 = []
+        for i, feature_1 in enumerate(features_1):
+            temp_point = []
+            temp_bias = []
+            for j, feature_2 in enumerate(features_2):
+                bias = np.sqrt(np.sum((feature_1-feature_2)**2))
+                if bias < FEATURE_MATCHING_THRESHOLD:
+                    temp_point.append(corners_2[j])
+                    temp_bias.append(bias)
+            if len(temp_point):
+                pix_1.append(corners_1[i])
+                pix_2.append(temp_point[np.argmin(temp_bias)])
+        return pix_1, pix_2
+    UNIT_LENGTH = ordered_img_seq[0].shape[1]*1.5
+    while len(ordered_img_seq)>1:
+        print("iteration",len(ordered_img_seq))
+        next_seq = []
+        for i in range(len(ordered_img_seq)//2):
+            image_ori,image_ori_2 = ordered_img_seq[2*i],ordered_img_seq[2*i+1]
+            if image_ori_2.shape[1]<image_ori.shape[1]*0.75:
+                image_ori,image_ori_2 = ordered_img_seq[2*i+1],ordered_img_seq[2*i]
+            image = rgb_to_gray(image_ori)
+            image_2 = rgb_to_gray(image_ori_2)
+            corners_1 = corner_selection(harris_response(image,0.05,3),0.01,3)
+            corners_2 = corner_selection(harris_response(image_2,0.05,3),0.01,3)
+            corners_1_filtered,corners_2_filtered=[],[]
+            for corner in corners_1:
+                if corner[1]> image_ori.shape[1]-UNIT_LENGTH:
+                    corners_1_filtered.append(corner)
+            for corner in corners_2:
+                if corner[1]<UNIT_LENGTH:
+                    corners_2_filtered.append(corner)
+            features_1 = histogram_of_gradients(image,corners_1_filtered)
+            features_2 = histogram_of_gradients(image_2,corners_2_filtered)
+            pix_1,pix_2=local_match(corners_1_filtered,corners_2_filtered,features_1,features_2)
+            if len(pix_1)<5 or len(pix_2)<5:
+                FEATURE_MATCHING_THRESHOLD+=0.05
+                next_seq.append(ordered_img_seq[2*i])
+                next_seq.append(ordered_img_seq[2*i+1])
+                continue
+            est = align_pair(pix_1,pix_2)
+            try:
+                blend = stitch_blend(image_ori,image_ori_2,est)
+            except:
+                FEATURE_MATCHING_THRESHOLD+=0.05
+                next_seq.append(ordered_img_seq[2*i])
+                next_seq.append(ordered_img_seq[2*i+1])
+                continue
+            timestamp = int(time.time())
+            cv2.imwrite(str(timestamp)+".png",blend)
+            next_seq.append(blend)
+        if len(ordered_img_seq)%2 ==1:
+           next_seq.append(ordered_img_seq[-1])
+        ordered_img_seq = next_seq
+    return ordered_img_seq[0]
 
 def match_visualizer(image,image_2,pix_1,pix_2):
     fig, (ax1, ax2) = plt.subplots(1, 2)
@@ -289,3 +343,23 @@ if __name__ == '__main__':
     # make image list
     # call generate panorama and it should work well
     # save the generated image following the requirements
+
+    # file_path = './Problem_Set_2/Problem2Images/1_1.jpg'
+    # file_path_2 = './Problem_Set_2/Problem2Images/1_2.jpg'
+    # image_ori = cv2.imread(file_path)
+    # image_ori_2 = cv2.imread(file_path_2)
+    # image = rgb_to_gray(image_ori)
+    # image_2 = rgb_to_gray(image_ori_2)
+    # pix_1,pix_2 = feature_matching(image,image_2)
+    # est = align_pair(pix_1,pix_2)
+    # plt.imshow(stitch_blend(image_ori,image_ori_2,est))
+    # plt.show()
+    file_path = './Problem_Set_2/Problem2Images/panoramas/grail/grail'
+    libary_ori = []
+    # 保证输入的顺序是从左到右的
+    for i in range(0,18):
+        temp_image = cv2.imread(file_path+f'{17-i:02d}.jpg')
+        libary_ori.append(temp_image)
+    blend = generate_panorama(libary_ori)
+    cv2.imwrite('./panoramas.png',blend)
+    
