@@ -243,7 +243,7 @@ def stitch_blend(img_1, img_2, est_homo):
                 est_img[x,y] = img_2[i,j]*ALPHA
             else:
                 est_img[x,y] = img_2[i,j]
-    # 然后画img1,这里可能需要插值，先不插
+    # 然后画img1
     for i in range(EST_WIDTH):
         for j in range(EST_HEIGHT):
             flag, target = is_inside([i+startx_1,j+starty_1,1])     
@@ -283,7 +283,9 @@ def generate_panorama(ordered_img_seq):
         return pix_1, pix_2
     UNIT_LENGTH = ordered_img_seq[0].shape[1]*1.5
     while len(ordered_img_seq)>1:
-        print("iteration",len(ordered_img_seq))
+        # print("iteration",len(ordered_img_seq))
+        if FEATURE_MATCHING_THRESHOLD > 0.3:
+            raise RuntimeError("unmatch")
         next_seq = []
         for i in range(len(ordered_img_seq)//2):
             image_ori,image_ori_2 = ordered_img_seq[2*i],ordered_img_seq[2*i+1]
@@ -316,8 +318,8 @@ def generate_panorama(ordered_img_seq):
                 next_seq.append(ordered_img_seq[2*i])
                 next_seq.append(ordered_img_seq[2*i+1])
                 continue
-            timestamp = int(time.time())
-            cv2.imwrite(str(timestamp)+".png",blend)
+            # timestamp = int(time.time())
+            # cv2.imwrite(str(timestamp)+".png",blend)
             next_seq.append(blend)
         if len(ordered_img_seq)%2 ==1:
            next_seq.append(ordered_img_seq[-1])
