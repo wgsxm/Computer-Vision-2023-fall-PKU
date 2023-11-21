@@ -168,7 +168,11 @@ def rq_decomposition(P):
     # 3. calculate T by P = K[R|T]
     # :param P: projection matrix
     # :return K, R, T: camera matrices
-
+    K, R = scipy.linalg.rq(P[:, :3])
+    factor = K[2, 2]
+    K /= factor
+    R *= factor
+    T = np.linalg.inv(K) @ P[:, 3]
     return K, R, T
 
 def evaluate_points(P, points_2d, points_3d):
