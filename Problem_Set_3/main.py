@@ -268,6 +268,30 @@ assert residual_a < 30 and residual_b < 30
 ## Task 5: Fundamental matrix estimation without ground-truth matches
 import cv2
 
+def ransac_fundamental(match1, match2, iterations=1000, threshold=0.01, num_picked=8):
+    best_fundamental = None
+    best_inliers = -float('inf')
+    best_errors = None
+    from random import sample
+    for _ in range(iterations):
+        indices = sample(range(len(match1)), num_picked)
+        random_match1 = np.array([match1[i, :] for i in indices])
+        random_match2 = np.array([match2[i, :] for i in indices])
+        random_match = np.concatenate([random_match1,random_match2],axis=1)
+        fundamental_matrix = fit_fundamental(random_match)
+        errors = 0
+        inliers = 0
+        for p1, p2 in zip(match1, match2):
+            temp_error = np.abs((np.concatenate([p2,[1]])).T@fundamental_matrix@(np.concatenate([p1,[1]])))
+            if temp_error < threshold:
+                inliers+=1
+            errors += temp_error
+        if inliers > best_inliers:
+            best_fundamental = fundamental_matrix
+            best_errors = errors
+            best_inliers = inliers
+    return best_fundamental,best_inliers,best_errors
+
 def fit_fundamental_without_gt(image1, image2):
     # Calculate fundamental matrix without groundtruth matches
     # 1. convert the images to gray
@@ -279,8 +303,25 @@ def fit_fundamental_without_gt(image1, image2):
     # :param image1, image2: two-view images
     # :return fundamental_matrix
     # :return matches: selected matched keypoints 
-
-    return fundamental_matrix, matches
+    gray1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY)
+    sift = cv2.SIFT_create()
+    keypoints1, descriptors1 = sift.detectAndCompute(gray1, None)
+    keypoints2, descriptors2 = sift.detectAndCompute(gray2, None)
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(descriptors1, descriptors2, k=2)
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(descriptors1, descriptors2, k=2)
+    good_matches = []
+    for m, n in matches:
+        if m.distance < 0.55 * n.distance:
+            good_matches.append(m)
+    matched_keypoints1 = np.float32([keypoints1[m.queryIdx].pt for m in good_matches])
+    matched_keypoints2 = np.float32([keypoints2[m.trainIdx].pt for m in good_matches])
+    matches_ret = np.concatenate([matched_keypoints1, matched_keypoints2], axis=1)
+    fundamental_matrix,inliers,errors = ransac_fundamental(matched_keypoints1,matched_keypoints2)
+    print(inliers,errors) 
+    return fundamental_matrix, matches_ret
 
 
 house_image1 = Image.open('data/library1.jpg')
