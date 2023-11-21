@@ -151,7 +151,14 @@ def calc_projection(points_2d, points_3d):
     # :param points_2d: 2D points N x 2
     # :param points_3d: 3D points N x 3
     # :return P: projection matrix
-
+    A = []
+    for i in range(points_2d.shape[0]):
+        X, Y, Z = points_3d[i]
+        u, v = points_2d[i]
+        A.append([X, Y, Z, 1, 0, 0, 0, 0, -u * X, -u * Y, -u * Z, -u])
+        A.append([0, 0, 0, 0, X, Y, Z, 1, -v * X, -v * Y, -v * Z, -v])
+    _, _, V = np.linalg.svd(A)
+    P = V[-1, :].reshape((3, 4))
     return P
 
 def rq_decomposition(P):
