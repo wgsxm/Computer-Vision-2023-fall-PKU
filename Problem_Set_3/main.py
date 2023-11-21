@@ -203,8 +203,16 @@ def triangulate_points(P1, P2, point1, point2):
     # :param P1, P2 (3 x 4): projection matrix of two cameras
     # :param point1, point2: points in two images
     # :return point_3d: 3D points calculated by triangulation
-
-    return point_3d
+    A = [
+        [P1[2][0] * point1[0] - P1[0][0], P1[2][1] * point1[0] - P1[0][1], P1[2][2] * point1[0] - P1[0][2], P1[2][3] * point1[0] - P1[0][3]],
+        [P1[2][0] * point1[1] - P1[1][0], P1[2][1] * point1[1] - P1[1][1], P1[2][2] * point1[1] - P1[1][2], P1[2][3] * point1[1] - P1[1][3]],
+        [P2[2][0] * point2[0] - P2[0][0], P2[2][1] * point2[0] - P2[0][1], P2[2][2] * point2[0] - P2[0][2], P2[2][3] * point2[0] - P2[0][3]],
+        [P2[2][0] * point2[1] - P2[1][0], P2[2][1] * point2[1] - P2[1][1], P2[2][2] * point2[1] - P2[1][2], P2[2][3] * point2[1] - P2[1][3]]
+    ]
+    _, _, V = np.linalg.svd(A)
+    point_3d = V[-1]
+    point_3d = point_3d / point_3d[-1]
+    return point_3d[:3]
 
 
 lab_points_3d = np.loadtxt('data/lab_3d.txt')
