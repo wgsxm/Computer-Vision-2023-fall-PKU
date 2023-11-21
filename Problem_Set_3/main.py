@@ -270,7 +270,7 @@ import cv2
 
 def ransac_fundamental(match1, match2, iterations=1000, threshold=0.01, num_picked=8):
     best_fundamental = None
-    best_inliers = -float('inf')
+    best_inliers = []
     best_errors = None
     from random import sample
     for _ in range(iterations):
@@ -280,13 +280,15 @@ def ransac_fundamental(match1, match2, iterations=1000, threshold=0.01, num_pick
         random_match = np.concatenate([random_match1,random_match2],axis=1)
         fundamental_matrix = fit_fundamental(random_match)
         errors = 0
-        inliers = 0
+        inliers = []
+        it = 0
         for p1, p2 in zip(match1, match2):
             temp_error = np.abs((np.concatenate([p2,[1]])).T@fundamental_matrix@(np.concatenate([p1,[1]])))
             if temp_error < threshold:
-                inliers+=1
+                inliers.append(it)
             errors += temp_error
-        if inliers > best_inliers:
+            it+=1
+        if len(inliers) > len(best_inliers):
             best_fundamental = fundamental_matrix
             best_errors = errors
             best_inliers = inliers
@@ -314,13 +316,20 @@ def fit_fundamental_without_gt(image1, image2):
     matches = bf.knnMatch(descriptors1, descriptors2, k=2)
     good_matches = []
     for m, n in matches:
-        if m.distance < 0.55 * n.distance:
+        if m.distance < 0.6 * n.distance:
             good_matches.append(m)
     matched_keypoints1 = np.float32([keypoints1[m.queryIdx].pt for m in good_matches])
     matched_keypoints2 = np.float32([keypoints2[m.trainIdx].pt for m in good_matches])
-    matches_ret = np.concatenate([matched_keypoints1, matched_keypoints2], axis=1)
+    
+    matches_ret=[]
+    # matches_ret = np.concatenate([matched_keypoints1, matched_keypoints2], axis=1)
     fundamental_matrix,inliers,errors = ransac_fundamental(matched_keypoints1,matched_keypoints2)
-    print(inliers,errors) 
+    print(len(inliers),errors)
+    matched_keypoints1 = matched_keypoints1.tolist()
+    matched_keypoints2 = matched_keypoints2.tolist()
+    for i in inliers:
+        matches_ret.append(matched_keypoints1[i]+matched_keypoints2[i])
+    matches_ret = np.array(matches_ret)
     return fundamental_matrix, matches_ret
 
 
