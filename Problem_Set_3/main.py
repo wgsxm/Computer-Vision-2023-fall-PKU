@@ -24,10 +24,16 @@ def normalize_points(pts):
     # 2. build a transformation matrix
     # :return normalized_pts: normalized points
     # :return T: transformation matrix from original to normalized points
-
-
+    mean = np.mean(pts, axis = 0)
+    centered_pts = pts - mean
+    mean_squared_distance = np.mean(np.sum(centered_pts**2, axis=1))
+    scale_factor = np.sqrt(2 / mean_squared_distance)
+    normalized_pts = centered_pts * scale_factor
+    T = np.array([[scale_factor, 0, -mean[0] * scale_factor],
+                  [0, scale_factor, -mean[1] * scale_factor],
+                  [0, 0, 1]])
     return normalized_pts, T
-
+NORMALIZE = True
 def fit_fundamental(matches):
     # Calculate fundamental matrix from ground truth matches
     # 1. (normalize points if necessary)
@@ -38,8 +44,33 @@ def fit_fundamental(matches):
     # 4. take the smallest eigen vector(9, ) as F(3 x 3)
     # 5. use SVD to decomposite F, set the smallest eigenvalue as 0, and recalculate F
     # 6. Report your fundamental matrix results
-
-    return F
+    if NORMALIZE:
+        pts1, T1 = normalize_points(matches[:, :2])
+        pts2, T2 = normalize_points(matches[:, 2:])
+        A = []
+        for i in range(pts1.shape[0]):
+            x0,y0 = pts1[i]
+            x1,y1 = pts2[i]
+            A.append([x1 * x0, x1 * y0, x1, y1 * x0, y1 * y0, y1, x0, y0, 1])
+        A = np.array(A)
+        _, _, V = np.linalg.svd(A)
+        F = V[-1, :].reshape((3, 3))
+        U, S, V = np.linalg.svd(F)
+        S[-1] = 0
+        F = T2.T @ U @ np.diag(S) @ V @ T1
+        return F
+    else:
+        A = []
+        for match in matches:
+            x0,y0,x1,y1=match
+            A.append([x1 * x0, x1 * y0, x1, y1 * x0, y1 * y0, y1, x0, y0, 1])
+        A = np.array(A)
+        _, _, V = np.linalg.svd(A)
+        F = V[-1, :].reshape((3, 3))
+        U, S, V = np.linalg.svd(F)
+        S[-1] = 0
+        F = U @ np.diag(S) @ V
+        return F
 
 def visualize_fundamental(matches, F, I1, I2):
     # Visualize the fundamental matrix in image 2
