@@ -80,10 +80,10 @@ def visualize_pointcloud(ref_image, disparity_map):
     # 6. Adjust the baseline and focal_length for better performance
     # 7. You may need to cut some outliers
     
-    baseline = 100
-    focal_length = 100
+    baseline = 100 * ((np.mean(disparity_map) / 86) ** 1.25)
+    focal_length = 100 
     rows, cols = ref_image.shape[:2]
-    threshold = np.mean(disparity_map) - np.std(disparity_map)
+    threshold = np.mean(disparity_map) - np.std(disparity_map) * 0.5
     points = []
     colors = []
     for i in range(rows):
@@ -93,12 +93,12 @@ def visualize_pointcloud(ref_image, disparity_map):
             points.append([j, -i, baseline * focal_length / disparity_map[i][j]])
             colors.append(ref_image[i][j])
     # Save pointcloud as ply file
-    pointcloud = trimesh.PointCloud(points, colors)
+    pointcloud = trimesh.PointCloud(points,colors)
     pointcloud.export("pointcloud.ply", file_type="ply")
     
 def compute_disparity_map_dp(ref_image, sec_image):
     # Dynamic programming stereo matching
-
+    pass
     return disparity_map
 
 if __name__ == "__main__":
@@ -131,7 +131,9 @@ if __name__ == "__main__":
 
     # Task 2: Compute depth map and visualize 3D pointcloud
     # You can use the gt/cv2 disparity map first, then try your own disparity map
+    tsukuba_disparity = compute_disparity_map_simple(tsukuba_image1_gray, tsukuba_image2_gray, 5, (0, 64), 'SSD')
     visualize_pointcloud(tsukuba_image1, tsukuba_disparity)
+    moebius_disparity = compute_disparity_map_simple(moebius_image1_gray, moebius_image2_gray, 5, (0, 64), 'SSD')
     visualize_pointcloud(moebius_image1, moebius_disparity)
 
     # Task 3: Non-local constraints
