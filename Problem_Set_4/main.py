@@ -24,15 +24,40 @@ def compute_disparity_map_simple(ref_image, sec_image, window_size, disparity_ra
     # 3. Generate a window for each pixel
     # 4. Search a disparity(d) in (min_disparity, max_disparity)
     # 5. Select the best disparity that minimize window difference between (row, col) and (row, col - d)
+    rows, cols = ref_image.shape
+    disparity_map = np.zeros_like(ref_image, dtype=np.float32)
 
+    for row in range(window_size, rows - window_size):
+        for col in range(window_size, cols - window_size):
+            ref_window = ref_image[row - window_size:row + window_size + 1, col - window_size:col + window_size + 1]
+            best_disparity = 0
+            min_cost = float('inf')
+            for d in range(disparity_range[0], disparity_range[1] + 1):
+                sec_col = col - d
+                if sec_col < window_size or sec_col >= cols - window_size:
+                    continue
+                sec_window = sec_image[row - window_size:row + window_size + 1, sec_col - window_size:sec_col + window_size + 1]
+                if matching_function == 'SSD':
+                    cost = np.sum((ref_window - sec_window) ** 2)
+                elif matching_function == 'SAD':
+                    cost = np.sum(np.abs(ref_window - sec_window))
+                elif matching_function == 'normalized_correlation':
+                    ref_normal = ref_window - np.mean(ref_window)
+                    sec_normal = sec_window - np.mean(sec_window)
+                    cost = -np.sum(ref_normal * sec_normal) / (np.sqrt(np.sum(ref_normal ** 2)) * np.sqrt(np.sum(sec_normal ** 2)) + 1e-6)
+                if cost < min_cost:
+                    min_cost = cost
+                    best_disparity = d
+            disparity_map[row, col] = best_disparity
     return disparity_map
+
 
 def simple_disparity(ref_image, second_image, gt_map):
     # 1. Change window size, disparity range and matching functions
     # 2. Report the disparity maps and running time
     
-    window_sizes = []  # Try different window sizes
-    disparity_range = (, )  # Determine appropriate disparity range
+    window_sizes = [1,2,3,4,5,6,7,8,9,10]  # Try different window sizes
+    disparity_range = (0, 64)  # Determine appropriate disparity range
     matching_functions = ['SSD', 'SAD', 'normalized_correlation']  # Try different matching functions
     
     # Generate disparity maps for different settings
@@ -44,8 +69,8 @@ def simple_disparity(ref_image, second_image, gt_map):
 def compute_depth_map(disparity_map, baseline, focal_length):
     # 1. Compute depth map by z = fB / (x - x')
 
-
-    return depth_map
+    # for the convenience of cutting outliers, I don't use this function
+    pass
 
 def visualize_pointcloud(ref_image, disparity_map):
     # 1. Calculate depth map from disparity
@@ -55,14 +80,18 @@ def visualize_pointcloud(ref_image, disparity_map):
     # 6. Adjust the baseline and focal_length for better performance
     # 7. You may need to cut some outliers
     
-    baseline = 10
-    focal_length = 10
-    depth_map = compute_depth_map(disparity_map, baseline, focal_length)
-
-    # Points
-
-    # Colors
-
+    baseline = 100
+    focal_length = 100
+    rows, cols = ref_image.shape[:2]
+    threshold = np.mean(disparity_map) - np.std(disparity_map)
+    points = []
+    colors = []
+    for i in range(rows):
+        for j in range(cols):
+            if disparity_map[i][j] < threshold:
+                continue
+            points.append([j, -i, baseline * focal_length / disparity_map[i][j]])
+            colors.append(ref_image[i][j])
     # Save pointcloud as ply file
     pointcloud = trimesh.PointCloud(points, colors)
     pointcloud.export("pointcloud.ply", file_type="ply")
