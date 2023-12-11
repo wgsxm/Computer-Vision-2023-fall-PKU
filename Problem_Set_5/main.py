@@ -4,7 +4,11 @@ import argparse
 import torchvision
 import torchvision.transforms as transforms
 import os
+
 PATH = './model.pt'
+if torch.cuda.is_available():
+    torch.device('cuda:0')
+
 class LinearClassifier(nn.Module):
     # define a linear classifier
     def __init__(self, in_channels, out_channels):
@@ -64,10 +68,10 @@ def crossentropyloss(logits: torch.Tensor, label: torch.Tensor):
     return: 
         cross entropy loss
     '''
-
+    logits = torch.clamp(logits, min = -100, max = 100)
     exp_logits = torch.exp(logits)
-    softmax_probs = exp_logits / exp_logits.sum(dim=1, keepdim=True)
-    loss = -torch.log(softmax_probs[torch.arange(logits.size(0)), label]).mean()
+    softmax_probs = exp_logits / (exp_logits.sum(dim=1, keepdim=True) + 1e-10)
+    loss = -torch.log(softmax_probs[torch.arange(logits.size(0)), label] + 1e-10).mean()
     return loss
 
 
@@ -97,7 +101,7 @@ def train(model, loss_function, optimizer, scheduler, args):
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
     # for-loop 
-    epoch_cnt = 2
+    epoch_cnt = 10
     running_loss = 0.0
     for epoch in range(epoch_cnt):
         # train
@@ -108,7 +112,7 @@ def train(model, loss_function, optimizer, scheduler, args):
             # zero the parameter gradients
             optimizer.zero_grad()
             # forward
-            outputs = model(input) 
+            outputs = model(inputs) 
             # loss backward
             loss = loss_function(outputs, labels)
             loss.backward()
@@ -127,6 +131,7 @@ def train(model, loss_function, optimizer, scheduler, args):
             # forward
             for data in testloader:
                 images, labels = data
+                images = nn.Flatten()(images)
                 outputs = model(images)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
@@ -165,6 +170,7 @@ def test(model, loss_function, args):
         # forward
         for data in testloader:
             images, labels = data
+            images = nn.Flatten()(images)
             outputs = model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
@@ -192,7 +198,7 @@ if __name__ == '__main__':
     # create optimizer
     if args.optimizer == 'adamw':
         # create Adamw optimizer
-        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.01)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
     elif args.optimizer == 'sgd':
         # create SGD optimizer
         optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.01)
@@ -205,7 +211,7 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
     elif args.scheduler == 'cosine':
         # create torch.optim.lr_scheduler.CosineAnnealingLR scheduler
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, step_size=100, gamma=0.1)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     else:
         raise AssertionError
 
