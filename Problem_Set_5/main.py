@@ -4,10 +4,14 @@ import argparse
 import torchvision
 import torchvision.transforms as transforms
 import os
+import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+
+log_dir = "logs"
+writer = SummaryWriter(log_dir)
 
 PATH = './model.pt'
-if torch.cuda.is_available():
-    torch.device('cuda:0')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class LinearClassifier(nn.Module):
     # define a linear classifier
@@ -68,8 +72,8 @@ def crossentropyloss(logits: torch.Tensor, label: torch.Tensor):
     return: 
         cross entropy loss
     '''
-    logits = torch.clamp(logits, min = -100, max = 100)
-    exp_logits = torch.exp(logits)
+    max_logits = torch.max(logits, dim=1, keepdim=True).values
+    exp_logits = torch.exp(logits - max_logits)
     softmax_probs = exp_logits / (exp_logits.sum(dim=1, keepdim=True) + 1e-10)
     loss = -torch.log(softmax_probs[torch.arange(logits.size(0)), label] + 1e-10).mean()
     return loss
@@ -85,6 +89,8 @@ def train(model, loss_function, optimizer, scheduler, args):
         scheduler: step or cosine
         args: configuration
     '''
+    model.to(device)
+    
     if os.path.exists(PATH):
         checkpoint = torch.load(PATH)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -103,11 +109,12 @@ def train(model, loss_function, optimizer, scheduler, args):
     # for-loop 
     epoch_cnt = 10
     running_loss = 0.0
+    
     for epoch in range(epoch_cnt):
         # train
         # get the inputs; data is a list of [inputs, labels]
         for i, data in enumerate(trainloader):
-            inputs, labels = data
+            inputs, labels = data[0].to(device), data[1].to(device)
             inputs = nn.Flatten()(inputs)
             # zero the parameter gradients
             optimizer.zero_grad()
@@ -118,10 +125,13 @@ def train(model, loss_function, optimizer, scheduler, args):
             loss.backward()
             # optimize
             optimizer.step()
+            print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss.item() / 2000:.3f}')
             running_loss += loss.item()
             if i % 2000 == 1999:    # print every 2000 mini-batches
                 print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
                 running_loss = 0.0
+                
+
         # adjust learning rate
         scheduler.step()
         # test
@@ -130,7 +140,7 @@ def train(model, loss_function, optimizer, scheduler, args):
         with torch.no_grad():
             # forward
             for data in testloader:
-                images, labels = data
+                images, labels = data[0].to(device), data[1].to(device)
                 images = nn.Flatten()(images)
                 outputs = model(images)
                 _, predicted = torch.max(outputs.data, 1)
@@ -153,6 +163,7 @@ def test(model, loss_function, args):
         loss_function: SVM loss of Cross-entropy loss
     '''
     # load checkpoint (Tutorial: https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)
+    model.to(device)
     checkpoint = torch.load(PATH)
     model.load_state_dict(checkpoint['model_state_dict'])
     # create testing dataset
@@ -169,7 +180,7 @@ def test(model, loss_function, args):
     with torch.no_grad():
         # forward
         for data in testloader:
-            images, labels = data
+            images, labels = data[0].to(device), data[1].to(device)
             images = nn.Flatten()(images)
             outputs = model(images)
             _, predicted = torch.max(outputs.data, 1)

@@ -98,7 +98,68 @@ def visualize_pointcloud(ref_image, disparity_map):
     
 def compute_disparity_map_dp(ref_image, sec_image):
     # Dynamic programming stereo matching
-    pass
+
+    ref_image = ref_image / 255
+    sec_image = sec_image / 255
+    disparity_map = np.zeros_like(ref_image, dtype=np.float32)
+    rows, cols = ref_image.shape
+    max_disparity = 64
+    window = 5
+    Occlusion = 0.8
+
+    for i in range(window, rows - window):
+        # initialize Disparity Space Image
+        disparity_space_image = np.full((cols, cols), 1e10)
+        for left in range(window, cols - window):
+            left_window = ref_image[i - window:i + window + 1, left - window:left + window + 1]
+            for right in range(max(left - max_disparity, window), left + 1):
+                right_window = sec_image[i - window:i + window + 1, right - window: right + window + 1]
+                disparity_space_image[left][right] = np.sum((right_window - left_window) ** 2)
+        
+        # dynamic programming: find the least cost from (window, window) to (cols - window - 1, cols - window - 1)
+        path = np.zeros_like(disparity_space_image)
+        c = np.full_like(disparity_space_image, 1e10)
+
+        # initialize first row and col
+        for j in range(cols):
+            c[j][0] = c[0][j] = j * Occlusion
+
+        # start dynamic programming
+        for x in range(1, cols):
+            for y in range(1, cols):
+                min1 = c[x - 1][y - 1] + disparity_space_image[x][y]
+                min2 = c[x][y - 1] + Occlusion
+                min3 = c[x - 1][y] + Occlusion
+                c[x][y] = min(min1, min2, min3)
+                if c[x][y] == min1:
+                    path[x][y] = 1
+                elif c[x][y] == min2:
+                    path[x][y] = 2
+                else:
+                    path[x][y] = 3
+        left = cols - 1
+        right = np.argmin(c[cols - 1])
+
+        # update disparity_map
+        while left > 0:
+            choice = path[left][right]
+            if choice == 1:
+                disparity_map[i][left] = left - right
+                left -= 1
+                right -= 1
+            elif choice == 2:
+                disparity_map[i][left] = left - right
+                right -= 1
+            elif choice == 3:
+                disparity_map[i][left] = 0
+                left -= 1
+            else:
+                break 
+        # occlusion filling
+        for j in range(1, cols):
+            if disparity_map[i][j] == 0:
+                disparity_map[i][j] = disparity_map[i][j - 1]
+
     return disparity_map
 
 if __name__ == "__main__":
