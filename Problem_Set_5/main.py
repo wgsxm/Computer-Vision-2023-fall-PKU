@@ -195,6 +195,13 @@ def test(model, loss_function, args):
     print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
 if __name__ == '__main__':
 
+    '''
+    为了保存tensorboard的数据，本程序会在当前文件夹创建log文件夹并用时间戳来标记每次训练
+    我的压缩包里包含了一个model.pt文件，这是我训练好的模型，应该可以直接用于测试（在本地是可以的）
+    可以用 python main.py --run=test  --model=fcnn --loss=crossentropyloss --optimizer=sgd --scheduler=cosine 来测试模型，准确率大约在53%左右
+    '''
+
+
     parser = argparse.ArgumentParser(description='The configs')
 
     parser.add_argument('--run', type=str, default='train')
