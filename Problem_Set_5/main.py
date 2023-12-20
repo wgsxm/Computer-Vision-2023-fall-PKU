@@ -5,10 +5,9 @@ import torchvision
 import torchvision.transforms as transforms
 import os
 import matplotlib.pyplot as plt
+import time
 from torch.utils.tensorboard import SummaryWriter
 
-log_dir = "logs"
-writer = SummaryWriter(log_dir)
 
 PATH = './model.pt'
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -90,12 +89,6 @@ def train(model, loss_function, optimizer, scheduler, args):
         args: configuration
     '''
     model.to(device)
-    
-    if os.path.exists(PATH):
-        checkpoint = torch.load(PATH)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     # create dataset
     transform = transforms.Compose(
         [transforms.ToTensor(),
@@ -110,9 +103,15 @@ def train(model, loss_function, optimizer, scheduler, args):
     epoch_cnt = 10
     running_loss = 0.0
     
+    # initialize summary writer
+    current_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())
+    log_dir = f'./log/{current_time}'
+    writer = SummaryWriter(log_dir)
+
     for epoch in range(epoch_cnt):
         # train
         # get the inputs; data is a list of [inputs, labels]
+        temp_loss = 0
         for i, data in enumerate(trainloader):
             inputs, labels = data[0].to(device), data[1].to(device)
             inputs = nn.Flatten()(inputs)
@@ -125,8 +124,8 @@ def train(model, loss_function, optimizer, scheduler, args):
             loss.backward()
             # optimize
             optimizer.step()
-            print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss.item() / 2000:.3f}')
             running_loss += loss.item()
+            temp_loss += loss.item()
             if i % 2000 == 1999:    # print every 2000 mini-batches
                 print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
                 running_loss = 0.0
@@ -137,6 +136,7 @@ def train(model, loss_function, optimizer, scheduler, args):
         # test
         correct = 0
         total = 0
+        model.eval()
         with torch.no_grad():
             # forward
             for data in testloader:
@@ -147,7 +147,13 @@ def train(model, loss_function, optimizer, scheduler, args):
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
         print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
-
+        model.train()
+        average_loss = temp_loss / len(trainloader)
+        accuracy = 100 * correct / total
+        writer.add_scalar('Loss/train', average_loss, epoch)
+        writer.add_scalar('Accuracy/train', accuracy, epoch)
+    writer.flush()
+    writer.close()
     # save checkpoint (Tutorial: https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)
     torch.save(
         {
