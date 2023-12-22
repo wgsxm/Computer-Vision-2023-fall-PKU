@@ -4,6 +4,7 @@ from models import VGG, ResNet, ResNext
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import time
+from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 PATH = './model.pt'
@@ -49,12 +50,12 @@ def train(model, args):
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     
-    # ctreat summary writer
+    # create summary writer
 
     current_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())
     log_dir = f'./log/{current_time}'
     writer = SummaryWriter(log_dir)
-
+    
     model.to(device)
     model.train()
     criterion = create_loss_function()
@@ -63,7 +64,8 @@ def train(model, args):
         # train
         running_loss = 0
         temp_loss = 0
-        for i, data in enumerate(train_loader):
+        progress_bar = tqdm(enumerate(train_loader, 0), total=len(train_loader), desc=f'Epoch {epoch + 1}/{args.num_epochs}', unit='batch')
+        for i, data in progress_bar:
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data[0].to(device), data[1].to(device)
             # zero the parameter gradients
@@ -79,10 +81,10 @@ def train(model, args):
             # accumulate loss
             running_loss += loss.item()
             temp_loss += loss.item()
-            if i % 200 == 199:    
-                print(f'[{epoch + 1}, {i + 1:5d}] loss: {temp_loss / 200:.3f}')
+            if i % 20 == 19:    
+                progress_bar.set_postfix(loss=f'{temp_loss / 20:.4f}')
                 temp_loss = 0.0
-
+        progress_bar.close()
         # scheduler adjusts learning rate
         scheduler.step()
         # test
@@ -131,7 +133,7 @@ def test(model, args):
     ])
     test_set = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
     # create dataloader
-    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, num_workers=2)
     # test
     correct, total = 0, 0
     model.eval()
@@ -152,21 +154,30 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='The configs')
     parser.add_argument('--run', type=str, default='train', help='Train or Test')
-    parser.add_argument('--model', type=str, default='VGG', help='Type of the chosen model')
+    parser.add_argument('--model', type=str, default='vgg', help='Type of the chosen model')
     parser.add_argument('--num_classes', type=int, default=10, help='Number of classes in the dataset')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
     parser.add_argument('--num_epochs', type=int, default=10, help='Number of training epochs')
-    parser.add_argument('--size', type=int, default=60, help='Size of a picture')
+    parser.add_argument('--size', type=int, default=60, help='Size of input')
+
     args = parser.parse_args()
 
-    if args.model == 'VGG':
+    if args.model == 'vgg':
         model = VGG(args.num_classes)
-    torch.save(
-        {
-            'model_state_dict': model.state_dict(),
-        }, PATH)
-    exit()
+        if args.size != 60:
+            raise RuntimeError
+    elif args.model == 'resnet':
+        model = ResNet(args.num_classes)
+    elif args.model == 'resnext':
+        model = ResNext(args.num_classes)
+    else:
+        raise AssertionError
+
     if args.run == 'train':
         train(model, args)
+    elif args.run == 'test':
+        test(model, args)
+    else: 
+        raise AssertionError
     # train / test
